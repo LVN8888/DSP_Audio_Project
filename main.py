@@ -4,6 +4,7 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 from analysis.signal_analysis import load_audio
 from experiments.pipelineA_raw import pipeline_raw
@@ -112,6 +113,11 @@ def run_pipeline(name, pipeline_func, max_files=None, min_count=2, output_name="
     print(f"Training samples: {len(X_train)}")
     print(f"Testing samples : {len(X_test)}")
 
+    print("\nStep 4.5: Scaling features...")
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
     print("\nStep 5: Training SVM model...")
     model = train_model(X_train, y_train)
 
@@ -135,7 +141,7 @@ if __name__ == "__main__":
     run_pipeline(
         name="Pipeline A - Raw Audio",
         pipeline_func=pipeline_raw,
-        max_files=500,
+        max_files=None,
         min_count=2,
         output_name="pipelineA_raw"
     )
@@ -143,7 +149,7 @@ if __name__ == "__main__":
     run_pipeline(
         name="Pipeline B - DSP Filtered",
         pipeline_func=pipeline_dsp,
-        max_files=500,
+        max_files=None,
         min_count=2,
         output_name="pipelineB_dsp"
     )
