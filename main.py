@@ -86,7 +86,7 @@ def main():
     builder = UrbanSound8KBuilder(config)
 
     if args.command == "train":
-        print("\n========== TRAIN (ALL-IN-ONE SVM PIPELINE) ==========")
+        print("\n========== TRAIN (SVM PIPELINE) ==========")
         summary = run_submission_pipeline(
             builder=builder,
             out_dir=args.out_dir,

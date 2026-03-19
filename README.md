@@ -141,14 +141,6 @@ outputs/
     └── submission_manifest.json
 ```
 
-## Gợi ý dùng để nộp bài
-
-Để ra đủ hình + bảng + model cuối, dùng:
-
-```bash
-python main.py train --out-dir outputs --pipeline both
-```
-
 Để demo predict:
 
 ```bash
@@ -157,7 +149,4 @@ python main.py predict --file path/to/test.wav --pipeline dsp --artifact outputs
 
 ## Ghi chú
 
-- Project này là **SVM-only**
-- Không cần dùng CNN
-- `train` là lệnh chính thay cho `submit`
 - Seed mặc định là `42`
