@@ -15,7 +15,7 @@ def train_model(X_train, y_train):
 
     # Use GridSearchCV for hyperparameter tuning
     grid_search = GridSearchCV(
-        SVC(),
+        SVC(probability=True),  # Enable probability for predict_proba
         param_grid,
         cv=3,  # 3-fold cross-validation
         scoring='accuracy',

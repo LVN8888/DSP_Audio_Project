@@ -1,155 +1,142 @@
+import argparse
 import os
-from collections import Counter
 
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
-from analysis.signal_analysis import load_audio
-from experiments.pipelineA_raw import pipeline_raw
-from experiments.pipelineB_dsp import pipeline_dsp
-from models.svm_model import train_model, evaluate_model
-from visualization.plots import plot_confusion_matrix
-
-
-DATASET_ROOT = os.path.join("data", "UrbanSound8K")
-AUDIO_ROOT = os.path.join(DATASET_ROOT, "audio")
-METADATA_PATH = os.path.join(DATASET_ROOT, "metadata", "UrbanSound8K.csv")
-OUTPUT_ROOT = "outputs"
+from analysis.signal_analysis import run_full_signal_analysis
+from datasets.urbansound import UrbanSound8KBuilder, UrbanSoundConfig
+from experiments.runner import (
+    fit_final_model,
+    generate_assignment_plots,
+    predict_with_classical,
+    run_submission_pipeline,
+)
+from preprocessing.audio import load_audio, preprocess_dsp
+from utils.reproducibility import save_json, set_global_seed
 
 
-def collect_features_from_urbansound8k(pipeline_func, max_files=None, progress_step=25):
-    if not os.path.exists(METADATA_PATH):
-        raise FileNotFoundError(f"Metadata file not found: {METADATA_PATH}")
+def build_parser():
+    parser = argparse.ArgumentParser(description="DSP Audio Project - SVM only version")
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    metadata = pd.read_csv(METADATA_PATH)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--dataset-root", type=str, default="data/UrbanSound8K")
+    common.add_argument("--sr", type=int, default=22050)
+    common.add_argument("--duration", type=float, default=4.0)
+    common.add_argument("--filter-type", choices=["fir", "iir"], default="iir")
+    common.add_argument("--seed", type=int, default=42)
 
-    if max_files is not None:
-        metadata = metadata.iloc[:max_files]
+    analyze = sub.add_parser("analyze", parents=[common], help="Run signal-level DSP analysis on one file")
+    analyze.add_argument("--file", type=str, required=True)
+    analyze.add_argument("--out-dir", type=str, default="outputs/analysis")
 
-    total_files = len(metadata)
-    print(f"Total files to process: {total_files}")
-
-    X = []
-    y = []
-
-    for idx, (_, row) in enumerate(metadata.iterrows(), start=1):
-        file_name = row["slice_file_name"]
-        fold = row["fold"]
-        label = row["class"]
-
-        file_path = os.path.join(AUDIO_ROOT, f"fold{fold}", file_name)
-
-        if not os.path.exists(file_path):
-            print(f"[{idx}/{total_files}] File not found: {file_path}")
-            continue
-
-        try:
-            signal, sr = load_audio(file_path)
-            features = pipeline_func(signal, sr)
-
-            X.append(features)
-            y.append(label)
-
-        except Exception as e:
-            print(f"[{idx}/{total_files}] Skipping {file_name} because of error: {e}")
-
-        if idx == 1 or idx % progress_step == 0 or idx == total_files:
-            print(f"Processed: {idx}/{total_files} files | Successful: {len(X)}")
-
-    return np.array(X), np.array(y)
-
-
-def filter_rare_classes(X, y, min_count=2):
-    class_counts = Counter(y)
-    keep_indices = [i for i, label in enumerate(y) if class_counts[label] >= min_count]
-
-    X_filtered = X[keep_indices]
-    y_filtered = y[keep_indices]
-
-    print("\nClass distribution after filtering rare classes:")
-    print(Counter(y_filtered))
-
-    return X_filtered, y_filtered
-
-
-def run_pipeline(name, pipeline_func, max_files=None, min_count=2, output_name="pipeline"):
-    print(f"\n========== {name} ==========")
-    print("Step 1: Loading audio and extracting features...")
-
-    X, y = collect_features_from_urbansound8k(
-        pipeline_func=pipeline_func,
-        max_files=max_files,
-        progress_step=25
+    train = sub.add_parser(
+        "train",
+        parents=[common],
+        help="One-command training pipeline: CV tables + plots + final SVM artifact",
     )
+    train.add_argument("--pipeline", choices=["dsp", "both"], default="both")
+    train.add_argument("--kfolds", type=int, default=5)
+    train.add_argument("--max-files", type=int, default=None)
+    train.add_argument("--out-dir", type=str, default="outputs")
 
-    if len(X) == 0:
-        raise ValueError("No valid audio files were loaded.")
+    fit_final = sub.add_parser("fit-final", parents=[common], help="Optional: fit only the final deployable SVM model")
+    fit_final.add_argument("--pipeline", choices=["raw", "dsp"], required=True)
+    fit_final.add_argument("--max-files", type=int, default=None)
+    fit_final.add_argument("--out-dir", type=str, default="outputs")
 
-    print(f"\nStep 2: Feature extraction complete. Valid samples: {len(X)}")
-    print("Original class distribution:")
-    print(Counter(y))
+    predict = sub.add_parser("predict", parents=[common], help="Predict a new audio file using a trained SVM artifact")
+    predict.add_argument("--file", type=str, required=True)
+    predict.add_argument("--pipeline", choices=["raw", "dsp"], required=True)
+    predict.add_argument("--artifact", type=str, required=True)
+    predict.add_argument("--segment-duration", type=float, default=4.0)
+    predict.add_argument("--hop-duration", type=float, default=2.0)
+    predict.add_argument("--threshold", type=float, default=0.45)
 
-    print("\nStep 3: Filtering rare classes...")
-    X, y = filter_rare_classes(X, y, min_count=min_count)
+    return parser
 
-    if len(X) == 0:
-        raise ValueError("No samples remain after filtering rare classes.")
 
-    unique_classes = np.unique(y)
-    if len(unique_classes) < 2:
-        raise ValueError("At least 2 valid classes are required for training.")
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    set_global_seed(args.seed)
 
-    print("\nStep 4: Splitting into training and testing sets...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y
+    if args.command == "analyze":
+        print("\n========== ANALYZE SIGNAL ==========")
+        print("Step 1: Loading raw audio...")
+        raw_signal, sr = load_audio(args.file, sr=args.sr)
+
+        print("Step 2: Applying DSP preprocessing...")
+        processed = preprocess_dsp(raw_signal, sr, duration=args.duration, filter_type=args.filter_type)
+
+        print("Step 3: Running full signal analysis...")
+        stats = run_full_signal_analysis(raw_signal, processed, sr, args.out_dir, filter_type=args.filter_type)
+
+        print("Step 4: Saving summary...")
+        save_json(stats, os.path.join(args.out_dir, "analysis_summary.json"))
+
+        print("Saved analysis to:", args.out_dir)
+        print(stats)
+        return
+
+    config = UrbanSoundConfig(
+        dataset_root=args.dataset_root,
+        sr=args.sr,
+        duration=args.duration,
+        filter_type=args.filter_type,
     )
+    builder = UrbanSound8KBuilder(config)
 
-    print(f"Training samples: {len(X_train)}")
-    print(f"Testing samples : {len(X_test)}")
+    if args.command == "train":
+        print("\n========== TRAIN (ALL-IN-ONE SVM PIPELINE) ==========")
+        summary = run_submission_pipeline(
+            builder=builder,
+            out_dir=args.out_dir,
+            kfolds=args.kfolds,
+            max_files=args.max_files,
+            seed=args.seed,
+            compare_pipelines=(args.pipeline == "both"),
+        )
+        print("\nTraining pipeline completed.")
+        print("Final DSP artifact:", summary["final_artifact_path"])
+        print("Manifest:", summary["manifest_path"])
+        return
 
-    print("\nStep 4.5: Scaling features...")
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    if args.command == "fit-final":
+        print("\n========== FIT FINAL SVM MODEL ==========")
+        _, artifact_path = fit_final_model(
+            builder=builder,
+            pipeline=args.pipeline,
+            model_type="classical",
+            out_dir=args.out_dir,
+            max_files=args.max_files,
+            classical_model="svm",
+            seed=args.seed,
+        )
+        print("Saved artifact to:", artifact_path)
+        return
 
-    print("\nStep 5: Training SVM model...")
-    model = train_model(X_train, y_train)
+    if args.command == "predict":
+        print("\n========== PREDICT WITH SVM ==========")
+        print("Step 1: Loading trained artifact...")
+        print("Step 2: Running prediction on new audio...")
 
-    print("\nStep 6: Evaluating model...")
-    y_pred = evaluate_model(model, X_test, y_test)
+        result = predict_with_classical(
+            file_path=args.file,
+            pipeline=args.pipeline,
+            artifact_path=args.artifact,
+            sr=args.sr,
+            filter_type=args.filter_type,
+            duration=args.duration,
+            segment_duration=args.segment_duration,
+            hop_duration=args.hop_duration,
+            threshold=args.threshold,
+        )
 
-    print("\nStep 7: Plotting confusion matrix...")
-    os.makedirs(OUTPUT_ROOT, exist_ok=True)
-    class_names = sorted(np.unique(y))
-    plot_confusion_matrix(
-        y_test,
-        y_pred,
-        class_names,
-        save_path=os.path.join(OUTPUT_ROOT, f"{output_name}_confusion_matrix.png")
-    )
-
-    print(f"\nFinished: {name}")
+        print("Prediction:", result["prediction"])
+        print("Confidence:", round(result["confidence"], 4))
+        print("Top-3:")
+        for label, prob in result["top3"]:
+            print(f"  - {label}: {prob:.4f}")
 
 
 if __name__ == "__main__":
-    run_pipeline(
-        name="Pipeline A - Raw Audio",
-        pipeline_func=pipeline_raw,
-        max_files=None,
-        min_count=2,
-        output_name="pipelineA_raw"
-    )
-
-    run_pipeline(
-        name="Pipeline B - DSP Filtered",
-        pipeline_func=pipeline_dsp,
-        max_files=None,
-        min_count=2,
-        output_name="pipelineB_dsp"
-    )
+    main()
