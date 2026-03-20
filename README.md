@@ -1,28 +1,28 @@
-# DSP Audio Project (SVM Only)
+# DSP Audio Classification Project (SVM-Only)
 
-Dự án này dùng **SVM duy nhất** cho bài phân loại âm thanh với UrbanSound8K.  
-Mọi phần CNN cũ đã được loại bỏ khỏi luồng sử dụng chính. Lệnh quan trọng nhất bây giờ là `train`, vì nó chạy toàn bộ pipeline trong **một lệnh**:
+This repository contains an **SVM-only** implementation for environmental sound classification on **UrbanSound8K**. The project is intentionally organized as a **DSP-centered study**: the classifier is used to measure the effect of preprocessing and handcrafted feature design, while the main comparison is between a **raw baseline** and a **DSP-enhanced pipeline**.
 
-- sinh ảnh theo yêu cầu assignment
-- chạy cross-validation
-- export bảng kết quả
-- lưu model SVM cuối để predict
-- tạo manifest kiểm tra file đầu ra
+## What this version focuses on
 
-## Cấu trúc thư mục
+- a **Raw pipeline** with minimal preprocessing
+- a **DSP pipeline** with light filtering, pre-emphasis, and richer DSP-oriented features
+- grouped cross-validation with exported fold-by-fold tables
+- assignment-ready plots and comparison outputs
+- a final deployable `dsp_svm.joblib` artifact for prediction
+
+## Project structure
 
 ```text
-DSP_Audio_Project/
-├── analysis/
-├── datasets/
-├── experiments/
-├── features/
-├── models/
-│   └── classical_models.py
-├── preprocessing/
-├── utils/
-├── visualization/
-├── main.py
+DSP_Audio/
+├── analysis/                # Signal-level analysis utilities
+├── datasets/                # UrbanSound8K dataset builder
+├── experiments/             # Training, comparison, prediction pipeline
+├── features/                # Handcrafted feature extraction
+├── models/                  # Classical SVM training code
+├── preprocessing/           # Audio preprocessing and filtering
+├── utils/                   # Reproducibility and helpers
+├── visualization/           # Tables and plots
+├── main.py                  # Command-line entry point
 ├── requirements.txt
 └── README.md
 ```
@@ -40,93 +40,104 @@ data/
         └── UrbanSound8K.csv
 ```
 
-## Cài đặt
+Default dataset root:
+
+```bash
+data/UrbanSound8K
+```
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Lệnh sử dụng
+## Main commands
 
-### 1) Train full pipeline bằng một lệnh
-Đây là lệnh chính để nộp bài.
+### 1) Full training pipeline
+
+This is the main command for assignment/report generation.
 
 ```bash
 python main.py train --out-dir outputs --pipeline both
 ```
 
-Lệnh này sẽ:
-- tạo ảnh trong `outputs/analysis_required_by_pdf/`
-- tạo bảng kết quả trong `outputs/results/`
-- tạo bảng so sánh Raw vs DSP trong `outputs/comparisons/`
-- lưu model cuối ở `outputs/artifacts/dsp_svm.joblib`
-- tạo manifest ở `outputs/submission/submission_manifest.csv`
+It will automatically:
 
-### 2) Train chỉ DSP
-Nếu bạn không cần so sánh Raw vs DSP:
+- generate required signal-analysis plots in `outputs/analysis_required_by_pdf/`
+- run grouped cross-validation
+- export fold metrics, summary tables, confusion matrices, ROC curves, and reports
+- compare Raw vs DSP pipelines
+- fit and save the final DSP SVM model to `outputs/artifacts/dsp_svm.joblib`
+- create a submission manifest in `outputs/submission/`
+
+### 2) DSP-only training
 
 ```bash
 python main.py train --out-dir outputs --pipeline dsp
 ```
 
-### 3) Train toàn bộ dataset
-Nếu muốn dùng full dataset, chỉ cần bỏ `--max-files`:
-
-```bash
-python main.py train --out-dir outputs --pipeline both
-```
-
-Nếu muốn giới hạn số file để chạy thử nhanh:
+### 3) Subset training for quick experiments
 
 ```bash
 python main.py train --out-dir outputs --pipeline both --max-files 2000
 ```
 
-### 4) Chỉnh số fold
+### 4) Change number of folds
+
 ```bash
 python main.py train --out-dir outputs --pipeline both --kfolds 5
 ```
 
-### 5) Fit riêng model cuối
-Lệnh này là tùy chọn, chỉ dùng khi bạn muốn train riêng model deploy mà không chạy lại toàn bộ bảng và ảnh.
+### 5) Fit only the final model
 
 ```bash
 python main.py fit-final --pipeline dsp --out-dir outputs
 ```
 
-### 6) Predict file mới
-Sau khi train xong, test file mới bằng:
+### 6) Predict a new file
 
 ```bash
 python main.py predict --file path/to/test.wav --pipeline dsp --artifact outputs/artifacts/dsp_svm.joblib
 ```
 
-### 7) Phân tích DSP cho một file
+### 7) Analyze one audio file
+
 ```bash
 python main.py analyze --file path/to/sample.wav --out-dir outputs/analysis_example
 ```
 
-## Ý nghĩa các lệnh
+## Pipeline design
 
-### `train`
-Lệnh all-in-one. Dùng để:
-- làm report
-- sinh hình
-- xuất bảng
-- lưu model cuối
+### Raw baseline
 
-### `fit-final`
-Chỉ train model cuối. Không sinh đầy đủ bảng và ảnh như `train`.
+The raw pipeline uses only minimal preprocessing:
 
-### `predict`
-Dùng model đã train để dự đoán một file âm thanh mới.
+- amplitude normalization
+- fixed-duration padding/truncation
 
-### `analyze`
-Chạy phân tích tín hiệu DSP cho một file đơn lẻ.
+### DSP-enhanced pipeline
 
-## File đầu ra quan trọng
+The DSP pipeline applies:
 
-Sau khi chạy `train`, bạn sẽ thường dùng các file này:
+- silence trimming
+- light pre-emphasis
+- gentle band-pass filtering
+- normalization after processing
+
+It is paired with a richer DSP-oriented feature set including:
+
+- MFCC, delta, delta-delta
+- log-mel statistics
+- chroma
+- spectral contrast
+- tonnetz
+- spectral flatness
+- band energy and band-energy ratios
+- spectral centroid, bandwidth, rolloff
+- zero-crossing rate, RMS, spectral entropy
+
+## Important outputs
 
 ```text
 outputs/
@@ -141,12 +152,23 @@ outputs/
     └── submission_manifest.json
 ```
 
-Để demo predict:
+## Recommended workflow
+
+Run the full evaluation pipeline:
 
 ```bash
-python main.py predict --file path/to/test.wav --pipeline dsp --artifact outputs/artifacts/dsp_svm.joblib
+python main.py train --pipeline both --out-dir outputs
 ```
 
-## Ghi chú
+Then test a new file:
 
-- Seed mặc định là `42`
+```bash
+python main.py predict --file samples/example.wav --pipeline dsp --artifact outputs/artifacts/dsp_svm.joblib
+```
+
+## Notes
+
+- default random seed: `42`
+- this repository is intentionally **SVM-only**
+- the primary scientific comparison is **Raw vs DSP**
+- if `--max-files` is omitted, the builder uses the full available dataset

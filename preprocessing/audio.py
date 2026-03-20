@@ -9,7 +9,7 @@ def load_audio(file_path, sr=22050, mono=True):
     return signal.astype(np.float32), sr
 
 
-def trim_silence(signal, top_db=20):
+def trim_silence(signal, top_db=30):
     trimmed, _ = librosa.effects.trim(signal, top_db=top_db)
     if len(trimmed) == 0:
         return signal
@@ -25,20 +25,15 @@ def normalize_audio(signal):
 
 def fix_length(signal, sr, duration=4.0):
     target_len = int(sr * duration)
-
     if len(signal) < target_len:
         signal = np.pad(signal, (0, target_len - len(signal)))
     else:
         signal = signal[:target_len]
-
     return signal.astype(np.float32)
 
 
 def preprocess_raw(signal, sr, duration=4.0):
-    """
-    Pipeline A - Raw Signal -> AI Model
-    Minimal preprocessing only.
-    """
+    """Pipeline A - minimal preprocessing only."""
     signal = normalize_audio(signal)
     signal = fix_length(signal, sr, duration=duration)
     return signal.astype(np.float32)
@@ -46,29 +41,21 @@ def preprocess_raw(signal, sr, duration=4.0):
 
 def preprocess_dsp(signal, sr, duration=4.0, filter_type="iir"):
     """
-    Pipeline B - DSP preprocessing -> Feature extraction -> AI Model
-    Includes:
-    - silence trimming
-    - normalization
-    - pre-emphasis
-    - FIR/IIR filtering
-    - fixed length
+    Pipeline B - DSP-enhanced signal.
+
+    This branch is intentionally more informative than the raw baseline:
+    - trim silence to reduce irrelevant leading/trailing segments
+    - apply light pre-emphasis to highlight transient/high-frequency cues
+    - apply gentle band-pass filtering to suppress very low-frequency rumble
+      and extreme high-frequency noise while preserving discriminative content
+    - normalize after processing for stable handcrafted features
     """
-    signal = trim_silence(signal, top_db=20)
+    signal = trim_silence(signal, top_db=30)
+    signal = pre_emphasis(signal, alpha=0.95)
+    signal = apply_filter(signal, sr, filter_type=filter_type, low=30, high=9000)
     signal = normalize_audio(signal)
-
-    # Pre-emphasis
-    signal = pre_emphasis(signal, alpha=0.97)
-
-    # Digital filter
-    signal = apply_filter(signal, sr, filter_type=filter_type)
-
-    # Normalize again after filtering
-    signal = normalize_audio(signal)
-
-    # Fixed duration
     signal = fix_length(signal, sr, duration=duration)
-
+    signal = normalize_audio(signal)
     return signal.astype(np.float32)
 
 
@@ -96,10 +83,7 @@ def waveform_to_logmelspec(
     )
 
     mel_db = librosa.power_to_db(mel, ref=np.max)
-
-    # standardize per sample
     mean = np.mean(mel_db)
     std = np.std(mel_db) + 1e-8
     mel_db = (mel_db - mean) / std
-
     return mel_db.astype(np.float32)

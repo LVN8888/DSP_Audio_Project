@@ -16,7 +16,10 @@ from preprocessing.audio import (
     preprocess_raw,
 )
 from utils.reproducibility import ensure_dir, save_json
-from visualization.plots import plot_pipeline_metric_comparison, save_pipeline_comparison_table
+from visualization.plots import (
+    plot_pipeline_metric_comparison,
+    save_pipeline_comparison_table,
+)
 
 
 DISPLAY_METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc_ovr"]
@@ -46,13 +49,19 @@ def print_result_tables(result, title):
 def generate_assignment_plots(builder, out_dir, max_files=None):
     analysis_dir = ensure_dir(os.path.join(out_dir, "analysis_required_by_pdf"))
     sample = builder.get_example_sample(max_files=max_files)
-    raw_signal = preprocess_raw(sample["signal"], sample["sr"], duration=builder.config.duration)
+
+    raw_signal = preprocess_raw(
+        sample["signal"],
+        sample["sr"],
+        duration=builder.config.duration,
+    )
+
     dsp_signal = preprocess_dsp(
         sample["signal"],
         sample["sr"],
         duration=builder.config.duration,
-        filter_type=builder.config.filter_type,
     )
+
     stats = run_full_signal_analysis(
         raw_signal=raw_signal,
         processed_signal=dsp_signal,
@@ -60,6 +69,7 @@ def generate_assignment_plots(builder, out_dir, max_files=None):
         out_dir=analysis_dir,
         filter_type=builder.config.filter_type,
     )
+
     save_json(
         {
             "example_file": sample["file_name"],
@@ -69,8 +79,12 @@ def generate_assignment_plots(builder, out_dir, max_files=None):
         },
         os.path.join(analysis_dir, "analysis_overview.json"),
     )
+
     print(f"\nSaved required signal-analysis plots to: {analysis_dir}")
-    print(f"Representative sample: {sample['file_name']} | label={sample['label']} | fold={sample['fold']}")
+    print(
+        f"Representative sample: {sample['file_name']} | "
+        f"label={sample['label']} | fold={sample['fold']}"
+    )
     return analysis_dir
 
 
@@ -119,7 +133,7 @@ def run_classical_experiment(builder, pipeline, classical_model, kfolds, out_dir
     return result_payload
 
 
-def compare_pipeline_results(result_a, result_b, comparison_dir, metric="accuracy", name="comparison"):
+def compare_pipeline_results(result_a, result_b, comparison_dir, metric="f1", name="comparison"):
     ensure_dir(comparison_dir)
 
     class DummyResult:
@@ -142,7 +156,9 @@ def compare_pipeline_results(result_a, result_b, comparison_dir, metric="accurac
         result_b["summary"],
         paired_stats,
         os.path.join(comparison_dir, f"{name}_performance_comparison.csv"),
+        paired_metric=metric,
     )
+
     plot_pipeline_metric_comparison(
         result_a["summary"],
         result_b["summary"],
@@ -266,7 +282,7 @@ def run_submission_pipeline(builder, out_dir, kfolds=5, max_files=None, seed=42,
             cv_results["raw_svm"],
             cv_results["dsp_svm"],
             comparison_dir,
-            metric="accuracy",
+            metric="f1",
             name="svm",
         )
     else:
@@ -307,7 +323,7 @@ def run_submission_pipeline(builder, out_dir, kfolds=5, max_files=None, seed=42,
     )
 
     if comparison_stats is not None:
-        print("\nPaired statistical comparison (accuracy):")
+        print("\nPaired statistical comparison (f1):")
         print(comparison_stats)
 
     print("\nSubmission outputs ready.")
@@ -329,7 +345,7 @@ def _apply_pipeline_to_segment(signal, sr, pipeline, duration, filter_type):
     if pipeline == "raw":
         return preprocess_raw(signal, sr, duration=duration)
     if pipeline == "dsp":
-        return preprocess_dsp(signal, sr, duration=duration, filter_type=filter_type)
+        return preprocess_dsp(signal, sr, duration=duration)
     raise ValueError(f"Unsupported pipeline: {pipeline}")
 
 
@@ -372,7 +388,7 @@ def predict_with_classical(
     probs_accum = []
     for segment in segments:
         processed = _apply_pipeline_to_segment(segment, sr, pipeline, duration=duration, filter_type=filter_type)
-        feat = extract_features(processed, sr).reshape(1, -1)
+        feat = extract_features(processed, sr, pipeline=pipeline).reshape(1, -1)
         feat = scaler.transform(feat)
         probs_accum.append(model.predict_proba(feat)[0])
 

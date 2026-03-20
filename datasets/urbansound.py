@@ -92,7 +92,7 @@ class UrbanSound8KBuilder:
             try:
                 signal, sr = load_audio(file_path, sr=self.config.sr)
                 processed = self._preprocess(signal, sr, pipeline)
-                features = extract_features(processed, sr)
+                features = extract_features(processed, sr, pipeline=pipeline)
 
                 X.append(features)
                 y.append(label)

@@ -105,7 +105,7 @@ def plot_pipeline_metric_comparison(raw_summary: dict, dsp_summary: dict, save_p
     plt.close(fig)
 
 
-def save_pipeline_comparison_table(raw_summary: dict, dsp_summary: dict, paired_stats: dict, save_path: str):
+def save_pipeline_comparison_table(raw_summary: dict, dsp_summary: dict, paired_stats: dict, save_path: str, paired_metric: str = 'f1'):
     os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
     rows = []
     all_metrics = sorted(set(raw_summary.keys()) | set(dsp_summary.keys()))
@@ -119,8 +119,9 @@ def save_pipeline_comparison_table(raw_summary: dict, dsp_summary: dict, paired_
             'dsp_mean': round(float(dsp.get('mean', np.nan)), 4),
             'dsp_ci95': round(float(dsp.get('ci95', np.nan)), 4),
             'delta_dsp_minus_raw': round(float(dsp.get('mean', np.nan) - raw.get('mean', np.nan)), 4),
-            'paired_t_stat': round(float(paired_stats.get('t_stat', np.nan)), 4) if metric == 'accuracy' else np.nan,
-            'paired_p_value': round(float(paired_stats.get('p_value', np.nan)), 6) if metric == 'accuracy' else np.nan,
+            'paired_metric': paired_metric if metric == paired_metric else '',
+            'paired_t_stat': round(float(paired_stats.get('t_stat', np.nan)), 4) if metric == paired_metric else np.nan,
+            'paired_p_value': round(float(paired_stats.get('p_value', np.nan)), 6) if metric == paired_metric else np.nan,
         })
     df = pd.DataFrame(rows)
     df.to_csv(save_path, index=False)

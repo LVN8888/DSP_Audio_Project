@@ -25,7 +25,7 @@ def design_fir_bandpass(sr, low=50, high=8000, numtaps=101):
     return taps
 
 
-def apply_filter(signal, sr, filter_type="iir", low=50, high=8000):
+def apply_filter(signal, sr, filter_type="iir", low=20, high=10000):
     if filter_type == "iir":
         b, a = design_iir_bandpass(sr, low=low, high=high, order=4)
         filtered = filtfilt(b, a, signal)

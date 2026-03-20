@@ -6,12 +6,22 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score, classification_report, precision_recall_fscore_support, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    precision_recall_fscore_support,
+    roc_auc_score,
+)
 from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 
-from utils.reproducibility import confidence_interval_95, ensure_dir, paired_t_test, save_json
+from utils.reproducibility import (
+    confidence_interval_95,
+    ensure_dir,
+    paired_t_test,
+    save_json,
+)
 from visualization.plots import (
     plot_confusion_matrix,
     plot_metric_summary,
@@ -32,28 +42,52 @@ class ClassicalCVResult:
 
 
 def build_classical_estimator(name: str):
+    """
+    Build SVM estimator and hyperparameter grid.
+
+    This project version supports SVM only.
+    The search space is intentionally focused on RBF SVM because
+    it usually works better with DSP-engineered audio features.
+    """
     if name != "svm":
         raise ValueError("This project version only supports SVM as requested.")
 
-    estimator = SVC(probability=True, class_weight="balanced")
+    estimator = SVC(
+        probability=True,
+        class_weight="balanced",
+        kernel="rbf",
+        random_state=42,
+    )
+
     param_grid = {
-        "C": [1, 10, 100],
-        "gamma": ["scale", 0.01, 0.001],
-        "kernel": ["rbf", "linear"],
+        "C": [3, 10, 30],
+        "gamma": [0.01, 0.001],
+        "kernel": ["rbf"],
     }
+
     return estimator, param_grid
 
 
 def build_classical_model(model_name="svm", seed=42):
+    """
+    Return a base SVM model without grid-search fitting.
+    """
     estimator, _ = build_classical_estimator(model_name)
     return estimator
 
 
 def _compute_fold_metrics(y_true, y_pred, y_proba=None, labels=None):
+    """
+    Compute classification metrics for one fold.
+    """
     accuracy = accuracy_score(y_true, y_pred)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, average="macro", zero_division=0
+        y_true,
+        y_pred,
+        average="macro",
+        zero_division=0,
     )
+
     metrics = {
         "accuracy": float(accuracy),
         "precision": float(precision),
@@ -87,15 +121,48 @@ def cross_validate_classical(
     experiment_name: str,
     seed: int = 42,
 ) -> ClassicalCVResult:
+    """
+    Run nested cross-validation for classical ML model (SVM only).
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Feature matrix.
+    y : np.ndarray
+        String labels or categorical labels.
+    groups : np.ndarray
+        Group IDs for StratifiedGroupKFold.
+    model_name : str
+        Must be 'svm'.
+    kfolds : int
+        Number of outer folds.
+    out_dir : str
+        Output directory for plots/tables.
+    experiment_name : str
+        Prefix used when saving artifacts.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    ClassicalCVResult
+    """
     ensure_dir(out_dir)
 
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
     class_names = le.classes_
 
-    outer_cv = StratifiedGroupKFold(n_splits=kfolds, shuffle=True, random_state=seed)
+    outer_cv = StratifiedGroupKFold(
+        n_splits=kfolds,
+        shuffle=True,
+        random_state=seed,
+    )
+
     fold_results = []
-    y_true_all, y_pred_all, y_proba_all = [], [], []
+    y_true_all = []
+    y_pred_all = []
+    y_proba_all = []
 
     estimator, param_grid = build_classical_estimator(model_name)
 
@@ -114,8 +181,10 @@ def cross_validate_classical(
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
 
-        inner_folds = min(3, len(np.unique(train_groups)))
+        unique_train_groups = np.unique(train_groups)
+        inner_folds = min(3, len(unique_train_groups))
         inner_n_splits = max(2, inner_folds)
+
         inner_cv = StratifiedGroupKFold(
             n_splits=inner_n_splits,
             shuffle=True,
@@ -126,9 +195,10 @@ def cross_validate_classical(
         search = GridSearchCV(
             estimator=clone(estimator),
             param_grid=param_grid,
-            scoring="accuracy",
+            scoring="f1_macro",
             cv=inner_cv,
             n_jobs=-1,
+            refit=True,
         )
         search.fit(X_train_scaled, y_train, groups=train_groups)
 
@@ -167,7 +237,11 @@ def cross_validate_classical(
 
     summary = {}
     for metric in ["accuracy", "precision", "recall", "f1", "roc_auc_ovr"]:
-        values = [fr[metric] for fr in fold_results if metric in fr and not np.isnan(fr[metric])]
+        values = [
+            fr[metric]
+            for fr in fold_results
+            if metric in fr and not np.isnan(fr[metric])
+        ]
         if values:
             summary[metric] = confidence_interval_95(values)
 
@@ -179,6 +253,7 @@ def cross_validate_classical(
         zero_division=0,
     )
 
+    # Save plots
     plot_confusion_matrix(
         le.inverse_transform(y_true_all),
         le.inverse_transform(y_pred_all),
@@ -186,6 +261,7 @@ def cross_validate_classical(
         save_path=os.path.join(out_dir, f"{experiment_name}_confusion_matrix.png"),
         normalize=False,
     )
+
     plot_confusion_matrix(
         le.inverse_transform(y_true_all),
         le.inverse_transform(y_pred_all),
@@ -193,10 +269,12 @@ def cross_validate_classical(
         save_path=os.path.join(out_dir, f"{experiment_name}_confusion_matrix_norm.png"),
         normalize=True,
     )
+
     plot_metric_summary(
         summary,
         save_path=os.path.join(out_dir, f"{experiment_name}_metrics.png"),
     )
+
     if y_proba_all is not None:
         plot_multiclass_roc(
             y_true_all,
@@ -205,17 +283,28 @@ def cross_validate_classical(
             save_path=os.path.join(out_dir, f"{experiment_name}_roc.png"),
         )
 
+    # Save tables
     fold_df = pd.DataFrame(fold_results)
     fold_df.to_csv(
         os.path.join(out_dir, f"{experiment_name}_fold_metrics.csv"),
         index=False,
     )
-    save_metrics_table(summary, os.path.join(out_dir, f"{experiment_name}_summary_table.csv"))
+
+    save_metrics_table(
+        summary,
+        os.path.join(out_dir, f"{experiment_name}_summary_table.csv"),
+    )
+
     pd.DataFrame(class_report).transpose().to_csv(
         os.path.join(out_dir, f"{experiment_name}_classification_report.csv")
     )
+
     save_json(
-        {"summary": summary, "classes": class_names.tolist(), "classification_report": class_report},
+        {
+            "summary": summary,
+            "classes": class_names.tolist(),
+            "classification_report": class_report,
+        },
         os.path.join(out_dir, f"{experiment_name}_summary.json"),
     )
 
@@ -230,7 +319,15 @@ def cross_validate_classical(
     )
 
 
-def compare_two_cv_results(result_a: ClassicalCVResult, result_b: ClassicalCVResult, metric: str = "accuracy"):
+def compare_two_cv_results(
+    result_a: ClassicalCVResult,
+    result_b: ClassicalCVResult,
+    metric: str = "accuracy",
+):
+    """
+    Compare two CV results using paired t-test.
+    Example: compare raw vs dsp.
+    """
     a_scores = [fr[metric] for fr in result_a.fold_results if metric in fr]
     b_scores = [fr[metric] for fr in result_b.fold_results if metric in fr]
     return paired_t_test(a_scores, b_scores)
@@ -243,6 +340,9 @@ def fit_final_classical_model(
     artifact_path: str,
     seed: int = 42,
 ):
+    """
+    Fit final SVM model on the full dataset and save artifact.
+    """
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
 
@@ -254,9 +354,10 @@ def fit_final_classical_model(
     search = GridSearchCV(
         estimator,
         param_grid=param_grid,
-        scoring="accuracy",
+        scoring="f1_macro",
         cv=3,
         n_jobs=-1,
+        refit=True,
     )
     search.fit(X_scaled, y_enc)
 
@@ -270,5 +371,8 @@ def fit_final_classical_model(
 
     ensure_dir(os.path.dirname(artifact_path) or ".")
     joblib.dump(payload, artifact_path)
+
+    print("\n[Final Model] Saved artifact to:", artifact_path)
+    print("[Final Model] Best params:", search.best_params_)
 
     return payload

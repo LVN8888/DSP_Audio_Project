@@ -5,7 +5,6 @@ from analysis.signal_analysis import run_full_signal_analysis
 from datasets.urbansound import UrbanSound8KBuilder, UrbanSoundConfig
 from experiments.runner import (
     fit_final_model,
-    generate_assignment_plots,
     predict_with_classical,
     run_submission_pipeline,
 )
@@ -38,12 +37,20 @@ def build_parser():
     train.add_argument("--max-files", type=int, default=None)
     train.add_argument("--out-dir", type=str, default="outputs")
 
-    fit_final = sub.add_parser("fit-final", parents=[common], help="Optional: fit only the final deployable SVM model")
+    fit_final = sub.add_parser(
+        "fit-final",
+        parents=[common],
+        help="Optional: fit only the final deployable SVM model",
+    )
     fit_final.add_argument("--pipeline", choices=["raw", "dsp"], required=True)
     fit_final.add_argument("--max-files", type=int, default=None)
     fit_final.add_argument("--out-dir", type=str, default="outputs")
 
-    predict = sub.add_parser("predict", parents=[common], help="Predict a new audio file using a trained SVM artifact")
+    predict = sub.add_parser(
+        "predict",
+        parents=[common],
+        help="Predict a new audio file using a trained SVM artifact",
+    )
     predict.add_argument("--file", type=str, required=True)
     predict.add_argument("--pipeline", choices=["raw", "dsp"], required=True)
     predict.add_argument("--artifact", type=str, required=True)
@@ -65,10 +72,16 @@ def main():
         raw_signal, sr = load_audio(args.file, sr=args.sr)
 
         print("Step 2: Applying DSP preprocessing...")
-        processed = preprocess_dsp(raw_signal, sr, duration=args.duration, filter_type=args.filter_type)
+        processed = preprocess_dsp(raw_signal, sr, duration=args.duration)
 
         print("Step 3: Running full signal analysis...")
-        stats = run_full_signal_analysis(raw_signal, processed, sr, args.out_dir, filter_type=args.filter_type)
+        stats = run_full_signal_analysis(
+            raw_signal,
+            processed,
+            sr,
+            args.out_dir,
+            filter_type=args.filter_type,
+        )
 
         print("Step 4: Saving summary...")
         save_json(stats, os.path.join(args.out_dir, "analysis_summary.json"))
